@@ -20,8 +20,8 @@ def get_staking_params():
 @staking_router.get("/pool",
                     summary="Pool queries the pool info.",
                     response_model=None)
-def get_token_pool():
-    result = request.get_token_pool()
+def get_token_pool(height: int | None = Query(default=None, description="Block height for historical state")):
+    result = request.get_token_pool(height=height)
     if result['code'] != 0:
         raise HTTPException(status_code=500, detail=result['message'])
     

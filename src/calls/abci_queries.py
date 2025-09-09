@@ -125,7 +125,7 @@ class SyncHttpCalls:
         self.rpc = rpc
         self.timeout = timeout
     
-    def handle_abci_request(self, callback, hex_data, path, prove=False) -> bytes:
+    def handle_abci_request(self, callback, hex_data, path, prove=False, height: int | None = None) -> bytes:
         try:
             payload = {
                 "jsonrpc": "2.0",
@@ -137,8 +137,14 @@ class SyncHttpCalls:
                 },
                 "id": -1
             }
-            headers = {"Content-Type": "application/json", "Accept": "application/json"}
-            response = requests.get(self.rpc, timeout=self.timeout , headers=headers, data=json.dumps(payload))
+
+            # height verilmişse ABCI paramlarına ekle
+            if height is not None:
+                # Tendermint JSON-RPC height string kabul eder (int de olur), yaygın pratik stringtir.
+                payload["params"]["height"] = str(height)
+
+            # JSON-RPC için POST + json= payload kullan (GET + body hatalıdır)
+            response = requests.post(self.rpc, timeout=self.timeout, json=payload)
 
             if response.status_code == 200:
                 response = response.json()
@@ -245,7 +251,7 @@ class SyncHttpCalls:
         
         return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.staking.v1beta1.Query/Params')
 
-    def get_token_pool(self):
+    def get_token_pool(self, height: int | None = None):
 
         query = QueryPoolRequest()
         serialized_query = query.SerializeToString()
@@ -256,8 +262,12 @@ class SyncHttpCalls:
             params = MessageToDict(query_response, preserving_proto_field_name=True)
             
             return params
-        
-        return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.staking.v1beta1.Query/Pool')
+        return self.handle_abci_request(
+            callback=process_response,
+            hex_data=hex_data,
+            path='/cosmos.staking.v1beta1.Query/Pool',
+            height=height
+        )
 
     def get_staking_historical_info(self, height: int):
 
