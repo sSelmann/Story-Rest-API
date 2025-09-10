@@ -53,6 +53,19 @@ def get_validator_by_valoper(
 
     return result['data']
 
+@staking_router.get("/validators/{validator_addr}/delegators/count",
+                    summary="Count delegators of a validator at a given height (historical).",
+                    response_model=None)
+def get_validator_delegators_count(
+    validator_addr: str = Path(description="validator address (valoper)"),
+    height: int = Query(..., description="Block height for historical state"),
+):
+    try:
+        count = request.get_validator_delegators_count(validator_addr=validator_addr, height=height)
+        return {"validator_addr": validator_addr, "height": height, "delegators_count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @staking_router.get("/validators/{validator_addr}/delegations",
                     summary="ValidatorDelegations queries delegate info for given validator.",
                     response_model=None)

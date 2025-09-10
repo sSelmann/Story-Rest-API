@@ -725,9 +725,13 @@ class SyncHttpCalls:
 
         return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.distribution.v1beta1.Query/DelegationRewards')
 
-    def get_validators_of_delegator_distributions(self, delegator_address: str):
-
-        query = DistributionQueryDelegatorValidatorsRequest(delegator_address=delegator_address)
+    def get_validators_of_delegator_distributions(self, delegator_address: str,
+                                                  pagination: PageRequest | None = None,
+                                                  height: int | None = None):
+        query = DistributionQueryDelegatorValidatorsRequest(
+            delegator_address=delegator_address,
+            pagination=pagination if pagination is not None else PageRequest(limit=500)
+        )
         serialized_query = query.SerializeToString()
         hex_data = serialized_query.hex()
 
@@ -737,8 +741,12 @@ class SyncHttpCalls:
             data = MessageToDict(query_response, preserving_proto_field_name=True)
             return data
 
-        return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.distribution.v1beta1.Query/DelegatorValidators')
-
+        return self.handle_abci_request(
+            callback=process_response,
+            hex_data=hex_data,
+            path='/cosmos.distribution.v1beta1.Query/DelegatorValidators',
+            height=height
+        )
     def get_delegator_withdraw_address(self, delegator_address: str):
 
         query = QueryDelegatorWithdrawAddressRequest(delegator_address=delegator_address)
@@ -752,6 +760,38 @@ class SyncHttpCalls:
             return data
 
         return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.distribution.v1beta1.Query/DelegatorWithdrawAddress')
+
+    def get_validator_delegators_count(self, validator_addr: str, height: int) -> int:
+        total = 0
+        next_key = b""
+        while True:
+            req = QueryValidatorDelegationsRequest(
+                validator_addr=validator_addr,
+                pagination=PageRequest(limit=500, key=next_key)
+            )
+            hex_data = req.SerializeToString().hex()
+
+            def _cb(raw: bytes):
+                resp = QueryValidatorDelegationsResponse()
+                resp.ParseFromString(raw)
+                return resp
+
+            out = self.handle_abci_request(
+                callback=_cb,
+                hex_data=hex_data,
+                path='/cosmos.staking.v1beta1.Query/ValidatorDelegations',
+                height=height
+            )
+            if out['code'] != 0:
+                raise RuntimeError(out['message'])
+
+            resp: QueryValidatorDelegationsResponse = out['data']
+            total += len(resp.delegation_responses)
+            next_key = resp.pagination.next_key
+            if not next_key:
+                break
+        return total
+
 
     def get_validator_distribution_info(self, validator_address: str):
 

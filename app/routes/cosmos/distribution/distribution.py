@@ -31,8 +31,16 @@ def get_community_pool():
 @distribution_router.get("/delegators/{delegator_address}/validators",
                     summary="DelegatorValidators queries the validators of a delegator.",
                     response_model=None)
-def get_validators_of_delegator_distributions(delegator_address: str = Path(description="delegator_address defines the delegator address to query for.")):
-    result = request.get_validators_of_delegator_distributions(delegator_address=delegator_address)
+def get_validators_of_delegator_distributions(
+    delegator_address: str = Path(description="delegator_address defines the delegator address to query for."),
+    pagination: PageRequest = Depends(get_pagination_params),
+    height: int | None = Query(default=None, description="Block height for historical state"),
+):
+    result = request.get_validators_of_delegator_distributions(
+        delegator_address=delegator_address,
+        pagination=pagination,
+        height=height
+    )
     if result['code'] != 0:
         raise HTTPException(status_code=500, detail=result['message'])
     
