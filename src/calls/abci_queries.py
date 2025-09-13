@@ -2,7 +2,7 @@ import requests
 import traceback
 import json
 import base64
-from typing import Literal
+from typing import Literal, Optional
 
 from utils.config import config
 from utils.logger import logger
@@ -351,20 +351,70 @@ class SyncHttpCalls:
         
         return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.staking.v1beta1.Query/DelegatorDelegations')
     
-    def get_validator_delegations(self, validator_addr: str, pagination: PageRequest):
-        
+    def get_validator_delegations(self, validator_addr: str, pagination: PageRequest, height: Optional[int] = None):
         query = QueryValidatorDelegationsRequest(validator_addr=validator_addr, pagination=pagination)
         serialized_query = query.SerializeToString()
         hex_data = serialized_query.hex()
-
+    
         def process_response(response):
             query_response = QueryValidatorDelegationsResponse()
             query_response.ParseFromString(response)
             data = MessageToDict(query_response, preserving_proto_field_name=True)
-            
             return data
-
-        return self.handle_abci_request(callback=process_response, hex_data=hex_data, path='/cosmos.staking.v1beta1.Query/ValidatorDelegations')
+    
+        # BURASI ÖNEMLİ: height'ı handle_abci_request'e geçir
+        return self.handle_abci_request(
+            callback=process_response,
+            hex_data=hex_data,
+            path='/cosmos.staking.v1beta1.Query/ValidatorDelegations',
+            height=height
+        )
+    
+    def get_validator_delegations_total_amount(self, validator_addr: str, height: int | None = None) -> dict:
+        
+        from protobuf.src.cosmospy_protobuf.cosmos.base.query.v1beta1.pagination_pb2 import PageRequest
+    
+        total_by_denom: dict[str, int] = {}
+        next_key = b""
+    
+        while True:
+            req = QueryValidatorDelegationsRequest(
+                validator_addr=validator_addr,
+                pagination=PageRequest(limit=500, key=next_key)
+            )
+            hex_data = req.SerializeToString().hex()
+    
+            def _cb(raw: bytes):
+                resp = QueryValidatorDelegationsResponse()
+                resp.ParseFromString(raw)
+                return resp
+    
+            out = self.handle_abci_request(
+                callback=_cb,
+                hex_data=hex_data,
+                path='/cosmos.staking.v1beta1.Query/ValidatorDelegations',
+                height=height
+            )
+            if out['code'] != 0:
+                raise RuntimeError(out['message'])
+    
+            resp: QueryValidatorDelegationsResponse = out['data']
+            # delegation_responses[].balance.amount string gelir
+            for dr in resp.delegation_responses:
+                denom = dr.balance.denom
+                amt = int(dr.balance.amount or "0")
+                total_by_denom[denom] = total_by_denom.get(denom, 0) + amt
+    
+            next_key = resp.pagination.next_key
+            if not next_key:
+                break
+    
+        # Basitlik için tek denom varsayalım; çoklu denom durumunda istersen liste dönebilirsin.
+        if not total_by_denom:
+            return {"denom": "", "amount": "0"}
+    
+        denom, amount = next(iter(total_by_denom.items()))
+        return {"denom": denom, "amount": str(amount)}
 
     def get_delegator_redelegation(self,
                                    delegator_addr: str,

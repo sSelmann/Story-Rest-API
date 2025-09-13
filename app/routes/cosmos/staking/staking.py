@@ -3,7 +3,7 @@ from src.calls.abci_queries import request
 from app.pagination.paginator import get_pagination_params
 from app.models.error_models import ErrorResponseModel
 from protobuf.src.cosmospy_protobuf.cosmos.base.query.v1beta1.pagination_pb2 import PageRequest
-from typing import Literal
+from typing import Literal, Optional
 
 staking_router = APIRouter(prefix="/cosmos/staking/v1beta1", tags=["Staking"], responses={500: {"model": ErrorResponseModel, "description": "Server-side error"}})
 
@@ -67,16 +67,44 @@ def get_validator_delegators_count(
         raise HTTPException(status_code=500, detail=str(e))
 
 @staking_router.get("/validators/{validator_addr}/delegations",
-                    summary="ValidatorDelegations queries delegate info for given validator.",
+                    summary="ValidatorDelegations queries delegate info for given validator (supports historical height).",
                     response_model=None)
 def get_validator_delegations(
     validator_addr: str = Path(description="validator_addr defines the validator address to query for."),
-    pagination: PageRequest = Depends(get_pagination_params)):
-    result = request.get_validator_delegations(validator_addr=validator_addr, pagination=pagination)
+    height: Optional[int] = Query(default=None, description="Block height for historical state. Omit for latest."),
+    include_total: bool = Query(default=True, description="If true, also returns total delegated amount to this validator at the given height."),
+    pagination: PageRequest = Depends(get_pagination_params)
+):
+    # 1) Liste (sayfalı) sonuç: height varsa ABCI'ye height geçir
+    result = request.get_validator_delegations(
+        validator_addr=validator_addr,
+        pagination=pagination,
+        height=height
+    )
     if result['code'] != 0:
         raise HTTPException(status_code=500, detail=result['message'])
-    
-    return result['data']
+
+    data = result['data']  # MessageToDict sonucunun dict'i
+
+    # 2) Toplam bakiyeyi isteğe bağlı ekle (height verilmişse o yükseklikte hesaplanır)
+    if include_total:
+        try:
+            total = request.get_validator_delegations_total_amount(
+                validator_addr=validator_addr,
+                height=height
+            )
+        except Exception as e:
+            # Toplam hesaplanamazsa endpoint'i boğmayalım, ama hata olduğu bilinsin.
+            total = {"error": str(e)}
+
+        # Yanıta "total_delegated" alanını ekle
+        # data yapısı: {"delegation_responses": [...], "pagination": {...}}
+        data = {
+            **data,
+            "total_delegated": total  # {"denom": "...", "amount": "..."} veya {"error": "..."}
+        }
+
+    return data
 
 @staking_router.get("/validators/{validator_addr}/delegations/{delegator_addr}",
                     summary="Delegation queries delegate info for given validator delegator pair.",
